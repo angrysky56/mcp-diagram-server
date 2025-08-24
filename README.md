@@ -12,6 +12,8 @@ A powerful Model Context Protocol (MCP) server for creating, manipulating, and a
 - **Interactive Prompts**: Guided diagram creation workflows
 - **Resource Access**: Access diagrams and templates as MCP resources
 
+![alt text](diagrams/meta_framework_integration.png)
+
 ## 🚀 Quick Start
 
 ### Installation
@@ -36,7 +38,7 @@ uv run playwright install chromium
 
 ### Claude Desktop Configuration
 
-1. Copy the example configuration from `example_mcp_config.json`
+1. Copy the example configuration from `example_mcp_config.json` with your path
 2. Add it to your Claude Desktop configuration file
 3. Restart Claude Desktop
 
@@ -45,8 +47,8 @@ uv run playwright install chromium
 ### Diagram Creation
 - `create_diagram` - Create a new Mermaid diagram with templates
 - `markdown_to_mindmap` - Convert markdown to mind map
-- `save_diagram` - Save diagram to file
 - `load_diagram` - Load diagram from file
+- Diagrams are saved to /diagrams in the repository root
 
 ### Diagram Management
 - `list_diagrams` - List all diagrams in memory
