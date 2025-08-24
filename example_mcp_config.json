@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "diagram-server": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/home/ty/Repositories/ai_workspace/mcp-diagram-server",
+        "run",
+        "main.py"
+      ],
+      "env": {
+        "LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}

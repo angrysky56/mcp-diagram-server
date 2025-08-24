@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcp-diagram-server"
+version = "0.1.0"
+description = "MCP server for creating and manipulating Mermaid diagrams and charts"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = ["mcp", "mermaid", "diagrams", "flowchart", "mindmap", "visualization"]
+authors = [
+  {name = "AI Workspace", email = "workspace@example.com"},
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+  "mcp[cli]>=1.2.0",
+  "aiofiles>=23.0.0",
+  "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0.0",
+  "pytest-asyncio>=0.21.0",
+  "black>=23.0.0",
+  "ruff>=0.1.0",
+  "mypy>=1.0.0",
+]
+advanced = [
+  "jinja2>=3.1.0",
+  "PyYAML>=6.0.0",
+  "Pillow>=10.0.0",
+  "cairosvg>=2.7.0",
+  "playwright>=1.40.0",
+  "watchdog>=3.0.0",
+]
+
+[project.urls]
+Documentation = "https://github.com/ai-workspace/mcp-diagram-server#readme"
+Issues = "https://github.com/ai-workspace/mcp-diagram-server/issues"
+Source = "https://github.com/ai-workspace/mcp-diagram-server"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_diagram"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = []
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true

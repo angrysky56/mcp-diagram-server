@@ -1,0 +1,923 @@
+"""
+MCP Diagram Server - Create and manipulate Mermaid diagrams
+"""
+
+import asyncio
+import atexit
+import json
+import logging
+import os
+import signal
+import sys
+from datetime import datetime
+from pathlib import Path
+
+import aiofiles
+from mcp.server.fastmcp import Context, FastMCP
+
+# Configure logging to stderr for MCP servers
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stderr
+)
+logger = logging.getLogger(__name__)
+
+# Initialize MCP server
+mcp = FastMCP("Diagram Server")
+
+# Global storage for diagrams
+diagram_storage: dict[str, dict] = {}
+background_tasks = set()
+
+# Default diagram templates
+DIAGRAM_TEMPLATES = {
+    "flowchart": """flowchart TD
+    Start[Start] --> A[Process A]
+    A --> B{Decision?}
+    B -->|Yes| C[Action C]
+    B -->|No| D[Action D]
+    C --> End[End]
+    D --> End""",
+
+    "sequence": """sequenceDiagram
+    participant A as Alice
+    participant B as Bob
+    A->>B: Hello Bob!
+    B->>A: Hi Alice!
+    A->>B: How are you?
+    B->>A: Great, thanks!""",
+
+    "gantt": """gantt
+    title Project Schedule
+    dateFormat YYYY-MM-DD
+    section Design
+    Design Phase :a1, 2024-01-01, 30d
+    section Development
+    Development :after a1, 60d""",
+
+    "class": """classDiagram
+    class Animal {
+        +String name
+        +int age
+        +eat()
+        +sleep()
+    }
+    class Dog {
+        +String breed
+        +bark()
+    }
+    Animal <|-- Dog""",
+
+    "er": """erDiagram
+    CUSTOMER {
+        int customer_id PK
+        string name
+        string email
+    }
+    ORDER {
+        int order_id PK
+        int customer_id FK
+        date order_date
+        decimal total
+    }
+    CUSTOMER ||--o{ ORDER : places""",
+
+    "git": """gitgraph
+    commit
+    branch develop
+    commit
+    commit
+    checkout main
+    commit
+    merge develop
+    commit""",
+
+    "pie": """pie title Project Time Distribution
+    "Development" : 45
+    "Testing" : 20
+    "Documentation" : 15
+    "Meetings" : 20""",
+
+    "journey": """journey
+    title User Journey
+    section Discovery
+        Visit website: 5: User
+        Browse products: 4: User
+    section Purchase
+        Add to cart: 3: User
+        Checkout: 2: User
+        Payment: 1: User, System
+    section Post-purchase
+        Confirmation: 5: User, System"""
+}
+
+# Cleanup functions for background task management
+def cleanup_tasks():
+    """Clean up background tasks"""
+    logger.info("Starting cleanup of background tasks")
+
+    # Cancel background tasks
+    for task in background_tasks:
+        if not task.done():
+            task.cancel()
+
+    background_tasks.clear()
+    logger.info("Cleanup completed")
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals"""
+    logger.info(f"Received signal {signum}, shutting down gracefully")
+    cleanup_tasks()
+    sys.exit(0)
+
+# Register cleanup handlers
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+atexit.register(cleanup_tasks)
+
+# Helper function to track background tasks
+def track_background_task(task: asyncio.Task):
+    """Track background tasks for cleanup"""
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
+
+# MCP Tools
+
+@mcp.tool()
+async def create_diagram(
+    ctx: Context,
+    diagram_type: str,
+    content: str | None = None,
+    name: str | None = None,
+    use_template: bool = False
+) -> str:
+    """
+    Create a new Mermaid diagram.
+
+    Args:
+        diagram_type: Type of diagram (flowchart, sequence, gantt, class, er, git,
+                      pie, journey, mindmap, etc.)
+        content: Mermaid syntax content. If not provided, uses template or default
+        name: Optional name for the diagram
+        use_template: Whether to use a template (default: False)
+
+    Returns:
+        Diagram ID and content
+    """
+    try:
+        diagram_id = f"diagram_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        if name:
+            diagram_id = f"{name}_{diagram_id}"
+
+        if use_template and diagram_type in DIAGRAM_TEMPLATES:
+            content = DIAGRAM_TEMPLATES[diagram_type]
+        elif not content:
+            # Provide basic templates for common types
+            if diagram_type == "mindmap":
+                content = """mindmap
+  root((Main Topic))
+    Branch 1
+      Sub-item 1
+      Sub-item 2
+    Branch 2
+      Sub-item 3"""
+            elif diagram_type == "timeline":
+                content = """timeline
+    title Project Timeline
+    2024-01 : Project Start
+    2024-02 : Planning Phase
+    2024-03 : Development
+    2024-04 : Testing
+    2024-05 : Launch"""
+            else:
+                content = "graph TD\n    A[Start] --> B[End]"
+
+        diagram_storage[diagram_id] = {
+            "type": diagram_type,
+            "content": content,
+            "created": datetime.now().isoformat(),
+            "modified": datetime.now().isoformat(),
+            "name": name or diagram_id
+        }
+
+        logger.info(f"Created diagram: {diagram_id}")
+        return (
+            f"Created diagram '{diagram_id}' of type '{diagram_type}'\n\n"
+            f"Content:\n{content}"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to create diagram: {e}")
+        raise
+
+@mcp.tool()
+async def markdown_to_mindmap(
+    ctx: Context,
+    markdown_text: str,
+    name: str | None = None
+) -> str:
+    """
+    Convert markdown text to a mind map diagram.
+
+    Args:
+        markdown_text: Markdown formatted text
+        name: Optional name for the mind map
+
+    Returns:
+        Generated mind map in Mermaid syntax
+    """
+    try:
+        lines = markdown_text.strip().split('\n')
+        mindmap_lines = ["mindmap", "  root((Main Topic))"]
+
+        for line in lines:
+            if line.strip():
+                # Count heading level
+                if line.startswith('#'):
+                    level = len(line.split()[0])
+                    text = line.replace('#', '').strip()
+                    indent = '  ' * (level + 1)
+                    mindmap_lines.append(f"{indent}{text}")
+                elif line.startswith(('- ', '* ', '+ ')):
+                    # Handle bullet points
+                    text = (line.replace('- ', '')
+                               .replace('* ', '')
+                               .replace('+ ', '')
+                               .strip())
+                    indent = '    '  # Standard indentation for bullet points
+                    mindmap_lines.append(f"{indent}{text}")
+
+        mindmap_content = '\n'.join(mindmap_lines)
+
+        # Store the mindmap
+        diagram_id = f"mindmap_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        if name:
+            diagram_id = f"{name}_{diagram_id}"
+
+        diagram_storage[diagram_id] = {
+            "type": "mindmap",
+            "content": mindmap_content,
+            "created": datetime.now().isoformat(),
+            "modified": datetime.now().isoformat(),
+            "name": name or diagram_id,
+            "source_markdown": markdown_text
+        }
+
+        logger.info(f"Converted markdown to mindmap: {diagram_id}")
+        return f"Created mindmap '{diagram_id}'\n\nMermaid syntax:\n{mindmap_content}"
+
+    except Exception as e:
+        logger.error(f"Failed to convert markdown to mindmap: {e}")
+        raise
+
+@mcp.tool()
+async def save_diagram(
+    ctx: Context,
+    diagram_id: str,
+    filepath: str | None = None
+) -> str:
+    """
+    Save a diagram to a file.
+
+    Args:
+        diagram_id: ID of the diagram to save
+        filepath: Optional filepath (defaults to ./diagrams/[id].mmd)
+
+    Returns:
+        Path where the diagram was saved
+    """
+    try:
+        if diagram_id not in diagram_storage:
+            return f"Diagram '{diagram_id}' not found"
+
+        diagram = diagram_storage[diagram_id]
+
+        if not filepath:
+            os.makedirs("diagrams", exist_ok=True)
+            filepath = f"diagrams/{diagram_id}.mmd"
+
+        async with aiofiles.open(filepath, 'w') as f:
+            await f.write(diagram['content'])
+
+        # Also save metadata
+        metadata_path = filepath.replace('.mmd', '_metadata.json')
+        metadata = {
+            "type": diagram["type"],
+            "name": diagram["name"],
+            "created": diagram["created"],
+            "modified": diagram["modified"]
+        }
+        if "source_markdown" in diagram:
+            metadata["source_markdown"] = diagram["source_markdown"]
+
+        async with aiofiles.open(metadata_path, 'w') as f:
+            await f.write(json.dumps(metadata, indent=2))
+
+        logger.info(f"Saved diagram {diagram_id} to {filepath}")
+        return f"Saved diagram to {filepath} and metadata to {metadata_path}"
+
+    except Exception as e:
+        logger.error(f"Failed to save diagram: {e}")
+        raise
+
+@mcp.tool()
+async def load_diagram(
+    ctx: Context,
+    filepath: str
+) -> str:
+    """
+    Load a diagram from a file.
+
+    Args:
+        filepath: Path to the diagram file (.mmd)
+
+    Returns:
+        Loaded diagram content and ID
+    """
+    try:
+        if not os.path.exists(filepath):
+            return f"File '{filepath}' not found"
+
+        async with aiofiles.open(filepath) as f:
+            content = await f.read()
+
+        # Try to load metadata if it exists
+        metadata_path = filepath.replace('.mmd', '_metadata.json')
+        metadata = {}
+        if os.path.exists(metadata_path):
+            async with aiofiles.open(metadata_path) as f:
+                metadata = json.loads(await f.read())
+
+        # Generate new ID for loaded diagram
+        diagram_id = f"loaded_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        name = Path(filepath).stem
+
+        diagram_storage[diagram_id] = {
+            "type": metadata.get("type", "flowchart"),
+            "content": content,
+            "created": metadata.get("created", datetime.now().isoformat()),
+            "modified": datetime.now().isoformat(),
+            "name": metadata.get("name", name),
+            "source_file": filepath
+        }
+
+        # Preserve source_markdown if it exists
+        if "source_markdown" in metadata:
+            diagram_storage[diagram_id]["source_markdown"] = metadata["source_markdown"]
+
+        logger.info(f"Loaded diagram from {filepath} as {diagram_id}")
+        return f"Loaded diagram '{diagram_id}' from {filepath}\n\nContent:\n{content}"
+
+    except Exception as e:
+        logger.error(f"Failed to load diagram: {e}")
+        raise
+
+@mcp.tool()
+async def list_diagrams(ctx: Context) -> str:
+    """
+    List all diagrams in memory.
+
+    Returns:
+        List of all diagrams with their metadata
+    """
+    try:
+        if not diagram_storage:
+            return "No diagrams currently in memory"
+
+        result = ["Current diagrams in memory:\n"]
+        for diagram_id, diagram in diagram_storage.items():
+            result.append(f"- ID: {diagram_id}")
+            result.append(f"  Type: {diagram['type']}")
+            result.append(f"  Name: {diagram['name']}")
+            result.append(f"  Created: {diagram['created']}")
+            result.append(f"  Modified: {diagram['modified']}")
+            if "source_file" in diagram:
+                result.append(f"  Source File: {diagram['source_file']}")
+            result.append("")
+
+        return '\n'.join(result)
+
+    except Exception as e:
+        logger.error(f"Failed to list diagrams: {e}")
+        raise
+
+@mcp.tool()
+async def get_diagram(
+    ctx: Context,
+    diagram_id: str
+) -> str:
+    """
+    Get a specific diagram by ID.
+
+    Args:
+        diagram_id: ID of the diagram to retrieve
+
+    Returns:
+        Diagram content and metadata
+    """
+    try:
+        if diagram_id not in diagram_storage:
+            return f"Diagram '{diagram_id}' not found"
+
+        diagram = diagram_storage[diagram_id]
+        result = [
+            f"Diagram: {diagram_id}",
+            f"Type: {diagram['type']}",
+            f"Name: {diagram['name']}",
+            f"Created: {diagram['created']}",
+            f"Modified: {diagram['modified']}",
+            "",
+            "Content:",
+            diagram['content']
+        ]
+
+        return '\n'.join(result)
+
+    except Exception as e:
+        logger.error(f"Failed to get diagram: {e}")
+        raise
+
+@mcp.tool()
+async def update_diagram(
+    ctx: Context,
+    diagram_id: str,
+    content: str
+) -> str:
+    """
+    Update an existing diagram's content.
+
+    Args:
+        diagram_id: ID of the diagram to update
+        content: New Mermaid syntax content
+
+    Returns:
+        Updated diagram information
+    """
+    try:
+        if diagram_id not in diagram_storage:
+            return f"Diagram '{diagram_id}' not found"
+
+        diagram_storage[diagram_id]['content'] = content
+        diagram_storage[diagram_id]['modified'] = datetime.now().isoformat()
+
+        logger.info(f"Updated diagram: {diagram_id}")
+        return f"Updated diagram '{diagram_id}'\n\nNew content:\n{content}"
+
+    except Exception as e:
+        logger.error(f"Failed to update diagram: {e}")
+        raise
+
+@mcp.tool()
+async def delete_diagram(
+    ctx: Context,
+    diagram_id: str
+) -> str:
+    """
+    Delete a diagram from memory.
+
+    Args:
+        diagram_id: ID of the diagram to delete
+
+    Returns:
+        Deletion confirmation
+    """
+    try:
+        if diagram_id not in diagram_storage:
+            return f"Diagram '{diagram_id}' not found"
+
+        deleted_diagram = diagram_storage.pop(diagram_id)
+        logger.info(f"Deleted diagram: {diagram_id}")
+        return (
+            f"Deleted diagram '{diagram_id}' ({deleted_diagram['name']}) "
+            f"of type '{deleted_diagram['type']}'"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to delete diagram: {e}")
+        raise
+
+@mcp.tool()
+async def list_templates(ctx: Context) -> str:
+    """
+    List all available diagram templates.
+
+    Returns:
+        List of available templates with descriptions
+    """
+    try:
+        result = ["Available diagram templates:\n"]
+
+        template_descriptions = {
+            "flowchart": "Basic flowchart with decision points",
+            "sequence": "Sequence diagram for interactions",
+            "gantt": "Gantt chart for project scheduling",
+            "class": "Class diagram for object-oriented design",
+            "er": "Entity relationship diagram for databases",
+            "git": "Git flow diagram for version control",
+            "pie": "Pie chart for data visualization",
+            "journey": "User journey mapping"
+        }
+
+        for template_name, template_content in DIAGRAM_TEMPLATES.items():
+            description = template_descriptions.get(template_name, "")
+            result.append(f"- **{template_name}**: {description}")
+
+        result.append(
+            "\nTo use a template, call create_diagram() with use_template=True"
+        )
+        return '\n'.join(result)
+
+    except Exception as e:
+        logger.error(f"Failed to list templates: {e}")
+        raise
+
+@mcp.tool()
+async def analyze_diagram(
+    ctx: Context,
+    diagram_id: str
+) -> str:
+    """
+    Analyze a diagram to provide insights and suggestions.
+
+    Args:
+        diagram_id: ID of the diagram to analyze
+
+    Returns:
+        Detailed analysis and suggestions
+    """
+    try:
+        if diagram_id not in diagram_storage:
+            return f"Diagram '{diagram_id}' not found"
+
+        diagram = diagram_storage[diagram_id]
+        content = diagram['content']
+        diagram_type = diagram['type']
+
+        await ctx.info(f"Analyzing diagram '{diagram_id}'...")
+
+        # Perform rule-based analysis
+        analysis_parts = []
+
+        # 1. Basic structure analysis
+        lines = [line.strip() for line in content.split('\n') if line.strip()]
+        node_count = len([line for line in lines if '-->' in line or '->>' in line or '--->' in line])
+
+        analysis_parts.append("**Diagram Overview:**")
+        analysis_parts.append(f"- Type: {diagram_type.capitalize()}")
+        analysis_parts.append(f"- Total lines: {len(lines)}")
+        analysis_parts.append(f"- Connection count: {node_count}")
+
+        # 2. Type-specific analysis
+        if diagram_type == "flowchart":
+            decisions = len([line for line in lines if '{' in line and '}' in line])
+            processes = len([line for line in lines if '[' in line and ']' in line])
+            analysis_parts.append("\n**Flowchart Analysis:**")
+            analysis_parts.append(f"- Decision points: {decisions}")
+            analysis_parts.append(f"- Process nodes: {processes}")
+
+            if 'Start' not in content and 'start' not in content.lower():
+                analysis_parts.append("- ⚠️  Consider adding a clear start node")
+            if 'End' not in content and 'end' not in content.lower():
+                analysis_parts.append("- ⚠️  Consider adding a clear end node")
+
+        elif diagram_type == "sequence":
+            participants = len([line for line in lines if 'participant' in line])
+            messages = len([line for line in lines if '->>' in line or '-->' in line])
+            analysis_parts.append("\n**Sequence Diagram Analysis:**")
+            analysis_parts.append(f"- Participants: {participants}")
+            analysis_parts.append(f"- Messages: {messages}")
+
+        elif diagram_type == "mindmap":
+            branches = len([line for line in lines if not line.startswith('  ') and line != 'mindmap'])
+            analysis_parts.append("\n**Mind Map Analysis:**")
+            analysis_parts.append(f"- Main branches: {branches}")
+
+        # 3. General suggestions
+        analysis_parts.append("\n**Improvement Suggestions:**")
+
+        if len(content) < 100:
+            analysis_parts.append("- Consider adding more detail and connections")
+        elif len(content) > 2000:
+            analysis_parts.append("- Consider breaking into smaller, focused diagrams")
+
+        if content.count('\n') < 5:
+            analysis_parts.append("- Add more structure with proper line breaks")
+
+        # Check for common issues
+        if '-->' in content and '--->' in content:
+            analysis_parts.append("- Standardize arrow types for consistency")
+
+        # 4. Best practices check
+        analysis_parts.append("\n**Best Practices Review:**")
+        analysis_parts.append("- ✅ Valid Mermaid syntax detected" if diagram_type in content else "- ⚠️  Add diagram type declaration")
+        analysis_parts.append("- ✅ Good structure" if node_count > 0 else "- ⚠️  Add more connections between elements")
+
+        analysis = '\n'.join(analysis_parts)
+
+        # Store the analysis
+        diagram_storage[diagram_id]['last_analysis'] = {
+            "timestamp": datetime.now().isoformat(),
+            "result": analysis
+        }
+
+        logger.info(f"Completed analysis of diagram: {diagram_id}")
+        return f"Analysis of diagram '{diagram_id}':\n\n{analysis}"
+
+    except Exception as e:
+        logger.error(f"Failed to analyze diagram: {e}")
+        raise
+
+@mcp.tool()
+async def suggest_diagram_improvements(
+    ctx: Context,
+    diagram_id: str,
+    improvement_type: str = "general"
+) -> str:
+    """
+    Get structured suggestions for improving a diagram.
+
+    Args:
+        diagram_id: ID of the diagram to improve
+        improvement_type: Type of improvements (general, clarity, performance,
+                          visual, structure)
+
+    Returns:
+        Detailed improvement suggestions with actionable recommendations
+    """
+    try:
+        if diagram_id not in diagram_storage:
+            return f"Diagram '{diagram_id}' not found"
+
+        diagram = diagram_storage[diagram_id]
+        content = diagram['content']
+        diagram_type = diagram['type']
+
+        await ctx.info(f"Generating improvement suggestions for '{diagram_id}'...")
+
+        suggestions = []
+
+        # Type-specific improvements
+        if diagram_type == "flowchart":
+            suggestions.extend([
+                "**Flowchart Improvements:**",
+                "- Ensure clear start and end points",
+                "- Use consistent shapes: rectangles for processes, diamonds for decisions",
+                "- Add descriptive labels to decision branches (Yes/No, True/False)",
+                "- Group related processes with subgraphs if complex",
+                "- Consider using different arrow styles for different types of flow"
+            ])
+
+            # Specific suggestions based on content analysis
+            if 'Start' not in content:
+                suggestions.append("- **Action**: Add a clear starting node: `Start[Start Process]`")
+            if '{' not in content:
+                suggestions.append("- **Action**: Add decision points using diamond syntax: `Decision{Question?}`")
+
+        elif diagram_type == "sequence":
+            suggestions.extend([
+                "**Sequence Diagram Improvements:**",
+                "- Clearly define all participants at the top",
+                "- Use activation boxes for processing time: `activate/deactivate`",
+                "- Include return messages with dashed arrows: `-->`",
+                "- Add notes for complex interactions",
+                "- Group related sequences with proper spacing"
+            ])
+
+            if 'participant' not in content:
+                suggestions.append("- **Action**: Define participants: `participant A as Alice`")
+            if 'activate' not in content:
+                suggestions.append("- **Action**: Show processing time with activation boxes")
+
+        elif diagram_type == "mindmap":
+            suggestions.extend([
+                "**Mind Map Improvements:**",
+                "- Keep the central topic focused and clear",
+                "- Balance branch depth (3-4 levels maximum)",
+                "- Use consistent indentation for hierarchy",
+                "- Group related concepts on the same branch",
+                "- Consider using icons or colors for visual distinction"
+            ])
+
+        elif diagram_type == "gantt":
+            suggestions.extend([
+                "**Gantt Chart Improvements:**",
+                "- Include realistic time estimates",
+                "- Show dependencies between tasks",
+                "- Add milestones for key deliverables",
+                "- Use consistent date formats",
+                "- Group tasks by project phase or team"
+            ])
+
+        # Improvement type-specific suggestions
+        improvement_focus = {
+            "clarity": [
+                "**Clarity Enhancements:**",
+                "- Use descriptive, action-oriented labels",
+                "- Avoid abbreviations unless well-known",
+                "- Ensure consistent terminology throughout",
+                "- Add explanatory notes for complex elements"
+            ],
+            "visual": [
+                "**Visual Improvements:**",
+                "- Use consistent styling and colors",
+                "- Ensure adequate spacing between elements",
+                "- Align elements for better visual flow",
+                "- Consider adding CSS classes for styling"
+            ],
+            "structure": [
+                "**Structural Improvements:**",
+                "- Group related elements with subgraphs",
+                "- Ensure logical flow from top to bottom or left to right",
+                "- Remove unnecessary complexity",
+                "- Balance the diagram layout"
+            ],
+            "performance": [
+                "**Performance Optimizations:**",
+                "- Keep total nodes under 50 for optimal rendering",
+                "- Avoid deeply nested structures",
+                "- Use simple, clear connections",
+                "- Consider breaking complex diagrams into multiple views"
+            ]
+        }
+
+        if improvement_type in improvement_focus:
+            suggestions.extend(improvement_focus[improvement_type])
+
+        # General analysis-based suggestions
+        lines = content.split('\n')
+        if len(lines) < 5:
+            suggestions.append("- **Structure**: Add more detail with additional nodes and connections")
+        elif len(lines) > 50:
+            suggestions.append("- **Simplification**: Consider breaking into multiple focused diagrams")
+
+        # Connection analysis
+        connections = len([line for line in lines if '-->' in line or '->>' in line])
+        nodes = len([line for line in lines if any(bracket in line for bracket in ['[', '(', '{'])])
+
+        if connections == 0:
+            suggestions.append("- **Critical**: Add connections between elements using arrows (-->)")
+        elif connections > nodes * 2:
+            suggestions.append("- **Optimization**: Reduce connection complexity for better readability")
+
+        # Example improved code section
+        suggestions.extend([
+            "\n**Example Enhancement:**",
+            "Here's how you could improve a section of your diagram:"
+        ])
+
+        if diagram_type == "flowchart":
+            suggestions.extend([
+                "```mermaid",
+                "flowchart TD",
+                "    Start([Start]) --> Input[Get User Input]",
+                "    Input --> Validate{Valid Input?}",
+                "    Validate -->|Yes| Process[Process Request]",
+                "    Validate -->|No| Error[Show Error]",
+                "    Error --> Input",
+                "    Process --> Success([Success])",
+                "```"
+            ])
+
+        result = '\n'.join(suggestions)
+        logger.info(f"Generated improvement suggestions for diagram: {diagram_id}")
+        return f"Improvement suggestions for '{diagram_id}' ({improvement_type}):\n\n{result}"
+
+    except Exception as e:
+        logger.error(f"Failed to suggest improvements: {e}")
+        raise
+
+# MCP Resources
+
+@mcp.resource("diagrams://list")
+async def resource_list_diagrams() -> str:
+    """Provide list of all diagrams as a resource."""
+    try:
+        diagrams_info = []
+        for diagram_id, diagram in diagram_storage.items():
+            diagrams_info.append({
+                "id": diagram_id,
+                "type": diagram["type"],
+                "name": diagram["name"],
+                "created": diagram["created"],
+                "modified": diagram["modified"]
+            })
+        return json.dumps(diagrams_info, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to provide diagrams list resource: {e}")
+        return json.dumps({"error": str(e)})
+
+@mcp.resource("diagrams://templates")
+async def resource_templates() -> str:
+    """Provide available diagram templates."""
+    try:
+        return json.dumps(DIAGRAM_TEMPLATES, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to provide templates resource: {e}")
+        return json.dumps({"error": str(e)})
+
+@mcp.resource("diagrams://{diagram_id}")
+async def resource_get_diagram(diagram_id: str) -> str:
+    """Get a specific diagram by ID as a resource."""
+    try:
+        if diagram_id not in diagram_storage:
+            return json.dumps({"error": f"Diagram '{diagram_id}' not found"})
+
+        return json.dumps(diagram_storage[diagram_id], indent=2)
+    except Exception as e:
+        logger.error(f"Failed to provide diagram resource: {e}")
+        return json.dumps({"error": str(e)})
+
+# MCP Prompts
+
+@mcp.prompt()
+def create_flowchart_prompt(description: str) -> str:
+    """Create a flowchart from a description."""
+    return f"""Create a Mermaid flowchart diagram based on this description:
+{description}
+
+Requirements:
+1. Use clear, descriptive node labels
+2. Show decision points as diamond shapes
+3. Include start and end nodes
+4. Use appropriate arrow types for flow direction
+5. Group related processes when applicable
+
+Example syntax:
+flowchart TD
+    Start[Start] --> A[Process]
+    A --> B{{Decision?}}
+    B -->|Yes| C[Action]
+    B -->|No| D[Alternative]
+    C --> End[End]
+    D --> End"""
+
+@mcp.prompt()
+def create_sequence_diagram_prompt(scenario: str) -> str:
+    """Create a sequence diagram from a scenario."""
+    return f"""Create a Mermaid sequence diagram for this scenario:
+{scenario}
+
+Requirements:
+1. Identify all participants/actors
+2. Show message flow chronologically
+3. Include return messages where appropriate
+4. Use activation boxes for processing time
+5. Add notes for important context
+
+Example syntax:
+sequenceDiagram
+    participant A as Actor
+    participant B as System
+    A->>B: Request
+    activate B
+    B-->>A: Response
+    deactivate B"""
+
+@mcp.prompt()
+def create_mindmap_prompt(topic: str) -> str:
+    """Create a mind map from a topic."""
+    return f"""Create a comprehensive mind map for this topic:
+{topic}
+
+Requirements:
+1. Start with a central root concept
+2. Branch out to main categories
+3. Add subcategories and details
+4. Keep related ideas grouped together
+5. Use concise, clear labels
+
+Example syntax:
+mindmap
+  root((Central Topic))
+    Branch 1
+      Sub-item A
+      Sub-item B
+    Branch 2
+      Sub-item C"""
+
+@mcp.prompt()
+def diagram_review_prompt(diagram_type: str) -> str:
+    """Interactive prompt for reviewing and improving diagrams."""
+    return f"""I'd like help reviewing and improving a {diagram_type} diagram. What aspects should we focus on?
+
+Please share your diagram content or describe what you want to create, and I'll help you improve it.
+
+Key review areas to consider:
+1. Clarity and readability
+2. Logical flow and structure
+3. Visual organization
+4. Completeness of information
+5. Best practices for {diagram_type} diagrams"""
+
+# Main execution
+if __name__ == "__main__":
+    try:
+        logger.info("Starting MCP Diagram Server")
+        mcp.run()
+    except KeyboardInterrupt:
+        logger.info("Server interrupted by user")
+    except Exception as e:
+        logger.error(f"Server error: {e}")
+    finally:
+        cleanup_tasks()

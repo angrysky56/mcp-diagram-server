@@ -1,0 +1,23 @@
+# Core MCP dependencies
+mcp[cli]>=1.2.0
+
+# Async file operations
+aiofiles>=23.0.0
+
+# Data validation and serialization
+pydantic>=2.0.0
+
+# Optional advanced dependencies (install separately if needed)
+# jinja2>=3.1.0          # Template rendering
+# PyYAML>=6.0.0          # Configuration files
+# Pillow>=10.0.0         # Image processing
+# cairosvg>=2.7.0        # SVG rendering
+# playwright>=1.40.0     # Browser automation
+# watchdog>=3.0.0        # File watching
+
+# Development dependencies (optional)
+# pytest>=7.0.0
+# pytest-asyncio>=0.21.0
+# black>=23.0.0
+# ruff>=0.1.0
+# mypy>=1.0.0
