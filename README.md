@@ -12,7 +12,7 @@ A powerful Model Context Protocol (MCP) server for creating, manipulating, and a
 - **Interactive Prompts**: Guided diagram creation workflows
 - **Resource Access**: Access diagrams and templates as MCP resources
 
-![alt text](diagrams/meta_framework_integration.png)
+![alt text](image.png)
 
 ## 🚀 Quick Start
 
