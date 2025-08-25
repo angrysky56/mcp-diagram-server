@@ -15,6 +15,9 @@ from pathlib import Path
 import aiofiles
 from mcp.server.fastmcp import Context, FastMCP
 
+# Import format conversion capabilities
+from format_extensions import UniversalDiagramConverter
+
 # Configure logging to stderr for MCP servers
 logging.basicConfig(
     level=logging.INFO,
@@ -32,6 +35,9 @@ background_tasks = set()
 
 # Directory for diagram storage
 DIAGRAMS_DIR = Path("diagrams")
+
+# Initialize format converter
+format_converter = UniversalDiagramConverter()
 
 # Default diagram templates
 DIAGRAM_TEMPLATES = {
@@ -165,7 +171,7 @@ async def discover_existing_diagrams() -> dict[str, dict]:
             metadata_file = DIAGRAMS_DIR / f"{diagram_id}_metadata.json"
 
             # Read diagram content
-            async with aiofiles.open(mmd_file, 'r') as f:
+            async with aiofiles.open(mmd_file) as f:
                 content = await f.read()
 
             # Try to read metadata
@@ -178,7 +184,7 @@ async def discover_existing_diagrams() -> dict[str, dict]:
 
             if metadata_file.exists():
                 try:
-                    async with aiofiles.open(metadata_file, 'r') as f:
+                    async with aiofiles.open(metadata_file) as f:
                         saved_metadata = json.loads(await f.read())
                         metadata.update(saved_metadata)
                 except Exception as e:
@@ -211,7 +217,7 @@ async def load_diagram_from_disk(diagram_id: str) -> dict | None:
             return None
 
         # Read content
-        async with aiofiles.open(mmd_file, 'r') as f:
+        async with aiofiles.open(mmd_file) as f:
             content = await f.read()
 
         # Read metadata if available
@@ -224,7 +230,7 @@ async def load_diagram_from_disk(diagram_id: str) -> dict | None:
 
         if metadata_file.exists():
             try:
-                async with aiofiles.open(metadata_file, 'r') as f:
+                async with aiofiles.open(metadata_file) as f:
                     saved_metadata = json.loads(await f.read())
                     metadata.update(saved_metadata)
             except Exception as e:
@@ -706,6 +712,225 @@ async def list_templates(ctx: Context) -> str:
 
     except Exception as e:
         logger.error(f"Failed to list templates: {e}")
+        raise
+
+# FORMAT CONVERSION MCP TOOLS
+
+@mcp.tool()
+async def convert_format_to_diagram(
+    ctx: Context,
+    content: str,
+    filename: str | None = None,
+    target_type: str = 'auto',
+    source_format: str = 'auto',
+    name: str | None = None
+) -> str:
+    """
+    Convert various file formats to Mermaid diagrams with AUTOMATIC SAVING.
+
+    **Multi-Format Support**: JSON→Flowcharts, CSV→Org Charts, Python→Class Diagrams, etc.
+
+    Args:
+        content: The input content to convert
+        filename: Optional filename for format detection
+        target_type: Target diagram type (auto, flowchart, mindmap, class, organizational, etc.)
+        source_format: Source format (auto, json, csv, python, markdown, plaintext)
+        name: Optional name for the generated diagram
+
+    Returns:
+        Generated diagram with format detection info and auto-save status
+    """
+    try:
+        # Convert using the format converter
+        diagram_content, detected_format = format_converter.convert_to_diagram(
+            content, filename, target_type, source_format
+        )
+
+        # Determine diagram type for storage
+        if target_type == 'auto':
+            if detected_format == 'json':
+                diagram_type = 'flowchart'
+            elif detected_format == 'csv':
+                diagram_type = 'organizational'
+            elif detected_format == 'python':
+                diagram_type = 'class'
+            else:
+                diagram_type = 'mindmap'
+        else:
+            diagram_type = target_type
+
+        # Generate diagram ID
+        diagram_id = f"converted_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        if name:
+            diagram_id = f"{name}_{diagram_id}"
+
+        # Store in memory
+        diagram_storage[diagram_id] = {
+            "type": diagram_type,
+            "content": diagram_content,
+            "created": datetime.now().isoformat(),
+            "modified": datetime.now().isoformat(),
+            "name": name or f"Converted {detected_format.title()}",
+            "source_format": detected_format,
+            "target_type": target_type,
+            "source_content": content[:500] + "..." if len(content) > 500 else content  # Store truncated source
+        }
+
+        # AUTO-SAVE: Automatically save to disk
+        save_result = await auto_save_diagram(diagram_id)
+
+        logger.info(f"Converted {detected_format} to {diagram_type} and auto-saved: {diagram_id}")
+        return (
+            f"✅ Converted {detected_format} to {diagram_type} diagram: '{diagram_id}'\n"
+            f"🔄 AUTO-SAVE: {save_result}\n\n"
+            f"📊 Generated Mermaid Diagram:\n{diagram_content}"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to convert format to diagram: {e}")
+        raise
+
+@mcp.tool()
+async def json_to_flowchart(
+    ctx: Context,
+    json_content: str,
+    name: str | None = None
+) -> str:
+    """
+    Convert JSON structure to a flowchart diagram with AUTOMATIC SAVING.
+
+    Perfect for visualizing data structures, API responses, or configuration files.
+
+    Args:
+        json_content: JSON string or content to convert
+        name: Optional name for the flowchart
+
+    Returns:
+        Generated flowchart with auto-save status
+    """
+    try:
+        return await convert_format_to_diagram(
+            ctx, json_content, None, 'flowchart', 'json', name
+        )
+    except Exception as e:
+        logger.error(f"Failed to convert JSON to flowchart: {e}")
+        raise
+
+@mcp.tool()
+async def csv_to_org_chart(
+    ctx: Context,
+    csv_content: str,
+    name: str | None = None,
+    chart_type: str = 'organizational'
+) -> str:
+    """
+    Convert CSV data to organizational or relationship chart with AUTOMATIC SAVING.
+
+    Args:
+        csv_content: CSV data (expects columns like Name, Role, Department, etc.)
+        name: Optional name for the chart
+        chart_type: Type of chart (organizational or relationship)
+
+    Returns:
+        Generated organizational chart with auto-save status
+    """
+    try:
+        return await convert_format_to_diagram(
+            ctx, csv_content, None, chart_type, 'csv', name
+        )
+    except Exception as e:
+        logger.error(f"Failed to convert CSV to org chart: {e}")
+        raise
+
+@mcp.tool()
+async def python_to_class_diagram(
+    ctx: Context,
+    python_code: str,
+    name: str | None = None
+) -> str:
+    """
+    Convert Python source code to class diagram with AUTOMATIC SAVING.
+
+    Automatically parses classes, methods, and relationships from Python code.
+
+    Args:
+        python_code: Python source code to analyze
+        name: Optional name for the class diagram
+
+    Returns:
+        Generated class diagram with auto-save status
+    """
+    try:
+        return await convert_format_to_diagram(
+            ctx, python_code, None, 'class', 'python', name
+        )
+    except Exception as e:
+        logger.error(f"Failed to convert Python to class diagram: {e}")
+        raise
+
+@mcp.tool()
+async def detect_file_format(
+    ctx: Context,
+    content: str,
+    filename: str | None = None
+) -> str:
+    """
+    Detect the format of input content.
+
+    Args:
+        content: Content to analyze
+        filename: Optional filename for additional context
+
+    Returns:
+        Detected format and analysis info
+    """
+    try:
+        detected_format = format_converter.format_detector.detect_format(content, filename)
+
+        analysis = [
+            "🔍 **Format Detection Results**",
+            f"Detected Format: **{detected_format}**",
+            f"Content Length: {len(content)} characters"
+        ]
+
+        if filename:
+            analysis.append(f"Filename: {filename}")
+            analysis.append(f"File Extension: {Path(filename).suffix}")
+
+        # Add format-specific info
+        if detected_format == 'json':
+            try:
+                import json
+                parsed = json.loads(content)
+                analysis.append(f"JSON Keys: {list(parsed.keys()) if isinstance(parsed, dict) else 'Array'}")
+            except Exception:
+                analysis.append("JSON: Invalid or partial JSON detected")
+
+        elif detected_format == 'csv':
+            lines = content.strip().split('\n')
+            analysis.append(f"CSV Rows: ~{len(lines)}")
+            if lines:
+                analysis.append(f"Columns: {lines[0].count(',') + 1}")
+
+        elif detected_format == 'python':
+            analysis.append("Python: Code analysis available for class diagram conversion")
+
+        # Add recommended conversions
+        recommendations = {
+            'json': 'json_to_flowchart for structure visualization',
+            'csv': 'csv_to_org_chart for organizational/relationship charts',
+            'python': 'python_to_class_diagram for code architecture',
+            'markdown': 'markdown_to_mindmap for concept mapping',
+            'plaintext': 'convert_format_to_diagram with target_type="mindmap"'
+        }
+
+        if detected_format in recommendations:
+            analysis.append(f"💡 Recommended: {recommendations[detected_format]}")
+
+        return '\n'.join(analysis)
+
+    except Exception as e:
+        logger.error(f"Failed to detect file format: {e}")
         raise
 
 # Initialization function to run at server startup
