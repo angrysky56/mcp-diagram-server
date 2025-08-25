@@ -19,7 +19,7 @@ A powerful Model Context Protocol (MCP) server for creating, manipulating, and m
 
 ### 🎨 **Rich Diagram Types**
 - **Flowcharts** - Process flows and decision trees
-- **Sequence Diagrams** - Interaction sequences  
+- **Sequence Diagrams** - Interaction sequences
 - **Mind Maps** - Concept organization and brainstorming
 - **Gantt Charts** - Project timelines and scheduling
 - **Class Diagrams** - Object-oriented system design
@@ -44,7 +44,7 @@ A powerful Model Context Protocol (MCP) server for creating, manipulating, and m
 
 1. Clone the repository:
 ```bash
-cd /home/ty/Repositories/ai_workspace/mcp-diagram-server
+cd /mcp-diagram-server
 ```
 
 2. Set up the Python environment:
@@ -68,8 +68,15 @@ Add to your Claude Desktop MCP configuration:
   "mcpServers": {
     "diagram-server": {
       "command": "uv",
-      "args": ["run", "/path/to/mcp-diagram-server/main.py"],
-      "cwd": "/path/to/mcp-diagram-server"
+      "args": [
+        "--directory",
+        "/your-path-to/mcp-diagram-server",
+        "run",
+        "main.py"
+      ],
+      "env": {
+        "LOG_LEVEL": "INFO"
+      }
     }
   }
 }
@@ -92,7 +99,7 @@ Add to your Claude Desktop MCP configuration:
 - `markdown_to_mindmap` - Convert structured markdown to mind maps
 - `detect_file_format` - Smart format detection with conversion recommendations
 
-### Library Management  
+### Library Management
 - `save_diagram` - Manual save to custom locations
 - `list_templates` - Browse available diagram templates
 - **Auto-saving** - Automatic persistence (always active)
@@ -169,7 +176,7 @@ create_diagram(diagram_type="sequence", use_template=True, name="UserFlow")
 
 ### Manual Save (`save_diagram`)
 - **When**: On-demand via tool call
-- **Where**: Custom locations you specify  
+- **Where**: Custom locations you specify
 - **Format**: `.mmd` file + `_metadata.json`
 - **Purpose**: Backups, exports, custom workflows
 
@@ -203,7 +210,7 @@ The integrated conversion system handles multiple input formats:
 
 ### **Python AST Parsing**
 - **Analyzes** Python source code structure
-- **Extracts** classes, methods, and inheritance relationships  
+- **Extracts** classes, methods, and inheritance relationships
 - **Generates** UML class diagrams with method signatures
 
 ### **Plain Text Intelligence**
@@ -219,7 +226,7 @@ The integrated conversion system handles multiple input formats:
 ## 🛡️ Enterprise Features
 
 - **Robust Error Handling**: Comprehensive exception management
-- **Process Management**: Background task cleanup and monitoring  
+- **Process Management**: Background task cleanup and monitoring
 - **Data Integrity**: Metadata validation and consistency checks
 - **Session Persistence**: Diagrams survive server restarts
 - **Format Validation**: Input validation for all supported formats
@@ -230,7 +237,7 @@ The integrated conversion system handles multiple input formats:
 Perfect for:
 - **AI-Powered Diagramming**: Let AI create and modify diagrams from any format
 - **Documentation Generation**: Convert data structures to visual documentation
-- **Process Visualization**: Transform workflows into clear diagrams  
+- **Process Visualization**: Transform workflows into clear diagrams
 - **Code Architecture**: Generate system diagrams from source code
 - **Data Visualization**: Convert CSVs and JSON to visual representations
 - **Knowledge Mapping**: Convert any structured content to mind maps
@@ -246,7 +253,7 @@ Contributions welcome! The codebase follows modern Python patterns with comprehe
 ## 🙏 Acknowledgments
 
 - Inspired by [Drawnix](https://drawnix.com) - Open-source whiteboard tool
-- Built with [FastMCP](https://github.com/modelcontextprotocol/python-sdk)  
+- Built with [FastMCP](https://github.com/modelcontextprotocol/python-sdk)
 - Powered by [Mermaid](https://mermaid.js.org) diagram syntax
 - Format conversion powered by Python AST parsing and intelligent structure analysis
 
