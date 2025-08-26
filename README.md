@@ -36,6 +36,10 @@ A powerful Model Context Protocol (MCP) server for creating, manipulating, and m
 - **Resource access** for MCP integration
 - **Background processing** with robust task management
 
+Note: If there is a syntax error converting a diagram remove any () in the underlined code error.
+
+![alt text](image-1.png)
+
 ![Diagram Examples](image.png)
 
 ## 🚀 Quick Start

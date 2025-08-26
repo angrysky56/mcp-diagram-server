@@ -569,19 +569,18 @@ async def list_diagrams(ctx: Context) -> str:
                 result.append("")
                 total_count += 1
 
-        # Show disk diagrams (excluding those already in memory)
+        # Show all diagrams saved to disk
         if existing_diagrams:
-            disk_only = {k: v for k, v in existing_diagrams.items() if k not in diagram_storage}
-            if disk_only:
-                result.append("💾 **Saved on Disk:**")
-                for diagram_id, diagram in disk_only.items():
-                    result.append(f"  • **{diagram['name']}** (`{diagram_id}`)")
-                    result.append(f"    Type: {diagram['type']}")
-                    result.append(f"    Created: {diagram['created']}")
-                    result.append(f"    Modified: {diagram['modified']}")
-                    result.append(f"    File: {diagram['file_path']}")
-                    result.append("")
-                    total_count += 1
+            result.append("💾 **Saved on Disk:**")
+            for diagram_id, diagram in existing_diagrams.items():
+                in_memory_note = " (also loaded in memory)" if diagram_id in diagram_storage else ""
+                result.append(f"  • **{diagram['name']}** (`{diagram_id}`){in_memory_note}")
+                result.append(f"    Type: {diagram['type']}")
+                result.append(f"    Created: {diagram['created']}")
+                result.append(f"    Modified: {diagram['modified']}")
+                result.append(f"    File: {diagram['file_path']}")
+                result.append("")
+                total_count += 1
 
         # Check for PNG files too
         png_files = list(DIAGRAMS_DIR.glob("*.png")) if DIAGRAMS_DIR.exists() else []
