@@ -42,27 +42,7 @@ Note: If there is a syntax error converting a diagram remove any () in the under
 
 ![Diagram Examples](image.png)
 
-## 🚀 Quick Start
-
-### Installation
-
-1. Clone the repository:
-```bash
-cd /mcp-diagram-server
-```
-
-2. Set up the Python environment:
-```bash
-uv venv --python 3.12 --seed
-source .venv/bin/activate
-uv add -e .
-```
-
-3. Optional - Install Playwright for rendering:
-```bash
-uv add playwright
-uv run playwright install chromium
-```
+## 🚀 Quick Start- Simply clone the repository and add the following
 
 ### Claude Desktop Configuration
 
@@ -84,6 +64,26 @@ Add to your Claude Desktop MCP configuration:
     }
   }
 }
+```
+
+### Installation- will auto-install with config
+
+1. Clone the repository:
+```bash
+cd /mcp-diagram-server
+```
+
+2. Set up the Python environment:
+```bash
+uv venv --python 3.12 --seed
+source .venv/bin/activate
+uv add -e .
+```
+
+3. Optional - Install Playwright for rendering:
+```bash
+uv add playwright
+uv run playwright install chromium
 ```
 
 ## 📚 Available MCP Tools
