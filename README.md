@@ -40,7 +40,9 @@ Note: If there is a syntax error converting a diagram remove any () in the under
 
 ![alt text](image-1.png)
 
-![Diagram Examples](image.png)
+![alt text](image-2.png)
+
+![alt text](image-3.png)
 
 ## 🚀 Quick Start- Simply clone the repository and add the following
 
